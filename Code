@@ -1,0 +1,66 @@
+# Smart Glasses Currency Recognition System
+# Developed for Raspberry Pi 5 + Camera Module
+
+import os
+import cv2
+import numpy as np
+import requests
+from time import sleep
+from picamera2 import Picamera2
+
+# Step 1: Capture image
+picam2 = Picamera2()
+config = picam2.create_still_configuration()
+picam2.configure(config)
+picam2.start()
+sleep(3)
+test_img_path = "files/test.jpg"
+picam2.capture_file(test_img_path)
+picam2.stop()
+
+# Step 2: ORB feature extraction
+orb = cv2.ORB_create()
+test_img = cv2.imread(test_img_path)
+if test_img is None:
+    print("❌ Failed to load test image.")
+    exit()
+(kp1, des1) = orb.detectAndCompute(test_img, None)
+if des1 is None:
+    print("❌ No features found in test image.")
+    exit()
+
+# Step 3: Load training images
+training_set = [
+    "files/train_050_1.webp",
+    "files/train_100_1.webp"
+]
+max_val = 8
+max_pt = -1
+
+for i in range(len(training_set)):
+    print(f"🔍 Checking: {training_set[i]}")
+    train_img = cv2.imread(training_set[i])
+    (kp2, des2) = orb.detectAndCompute(train_img, None)
+    if des2 is None:
+        continue
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+    all_matches = bf.knnMatch(des1, des2, k=2)
+    good = [m for m, n in all_matches if m.distance < 0.9 * n.distance]
+    if len(good) > max_val:
+        max_val = len(good)
+        max_pt = i
+
+# Step 4: Result + Audio + Cloud
+note_audio_paths = {
+    '50': 'note50.wav',
+    '100': 'note100.wav'
+}
+if max_pt != -1:
+    note = training_set[max_pt].split('/')[-1][6:9].lstrip('0')
+    print(f"✅ Detected: Rs. {note}")
+    os.system(f'aplay {note_audio_paths.get(note)}')
+    url = f'https://api.thingspeak.com/update?api_key=YOUR_API_KEY&field1={note}'
+    r = requests.get(url)
+    print("📡 Data sent to ThingSpeak" if r.status_code == 200 else "⚠️ Failed to log data.")
+else:
+    print("❌ No matching currency found.")
